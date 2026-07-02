@@ -1,0 +1,27 @@
+#!/bin/sh
+
+# 1. 配置 LAN 口 IP、网关与 DNS
+uci set network.lan.ipaddr='192.168.2.1'
+uci set network.lan.gateway='192.168.2.254'
+uci del network.lan.dns
+uci add_list network.lan.dns='192.168.2.1'
+uci add_list network.lan.dns='119.29.29.29'
+
+# 2. 启用 SSH 并将默认端口设为 22
+uci set dropbear.@dropbear[0].Port='22'
+uci set dropbear.@dropbear[0].PasswordAuth='on'
+uci set dropbear.@dropbear[0].RootPasswordAuth='on'
+
+# 3. 默认开启 DAED 的 UCI 占位符
+uci set daed.config.enabled='0'
+
+# 提交配置变更
+uci commit network
+uci commit dropbear
+uci commit daed
+
+# 4. 强制重置 root 密码为 password (使用标准 MD5/SHA512 哈希)
+echo "root:\$1\$w7b1mP9K\$L19NIDmNBlW8p208BdBp0.::0:99999:7:::" > /etc/shadow
+sed -i 's/^root:[^:]*:/root:\$1\$w7b1mP9K\$L19NIDmNBlW8p208BdBp0.:/' /etc/passwd
+
+exit 0
