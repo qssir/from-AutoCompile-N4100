@@ -1,0 +1,32 @@
+#!/bin/sh
+
+# 1. 配置网络接口默认值 (LAN IP, 网关, DNS)
+uci set network.lan.ipaddr='192.168.2.1'
+uci set network.lan.gateway='192.168.2.254'
+uci del network.lan.dns
+uci add_list network.lan.dns='192.168.2.1'
+uci commit network
+
+# 2. 设置默认 root 密码为 password
+# OpenWrt 密码采用 shadow 密文，以下为 password 的标准加密 hash
+sed -i 's/^root:[^:]*:/root:$1$wBy9ZpMX$K.G6ZpM0dB8vXbZ3ZJb7X\/:/' /etc/shadow
+
+# 3. 确保 SSH 端口为 22 并允许 root 登录
+uci set dropbear.@dropbear[0].Port='22'
+uci set dropbear.@dropbear[0].PasswordAuth='on'
+uci set dropbear.@dropbear[0].RootPasswordAuth='on'
+uci commit dropbear
+
+# 4. 定制专属的开机接入 TTY Banner 画面
+cat << 'EOF' > /etc/banner
+  _______                     ________        __
+ |       |.-----.-----.-----.|  |  |  |.----.|  |_.
+ |   -   ||  _  |  -__|     ||  |  |  ||   _||   _|
+ |_______||   __|_____|__|__||________||__|  |____|
+          |__| W I R E L E S S   F R E E D O M
+ -----------------------------------------------------
+  BleachWrt Custom Edition (Intel N4100 x86_64)
+ -----------------------------------------------------
+EOF
+
+exit 0
