@@ -13,6 +13,8 @@ jobs:
       pkg_version: ${{ steps.check.outputs.pkg_version }}
       latest_daed_full: ${{ steps.check.outputs.latest_daed_full }}
       latest_daed_short: ${{ steps.check.outputs.latest_daed_short }}
+      latest_wing_short: ${{ steps.check.outputs.latest_wing_short }}
+      latest_core_short: ${{ steps.check.outputs.latest_core_short }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -22,24 +24,27 @@ jobs:
         id: check
         run: |
           DAED_JSON=$(curl -s https://api.github.com/repos/daeuniverse/daed/commits/main)
+          WING_JSON=$(curl -s https://api.github.com/repos/daeuniverse/dae-wing/commits/main)
+          CORE_JSON=$(curl -s https://api.github.com/repos/daeuniverse/dae/commits/main)
+
           UPSTREAM_DAED_FULL=$(echo "$DAED_JSON" | jq -r '.sha')
           UPSTREAM_DAED=$(echo "$UPSTREAM_DAED_FULL" | cut -b 1-7)
-
-          CURRENT_DAED=$(grep "PKG_VERSION:=" daed/Makefile | cut -d= -f2 || true)
-
-          echo "Upstream DAED: $UPSTREAM_DAED_FULL, Local: $CURRENT_DAED"
+          UPSTREAM_WING=$(echo "$WING_JSON" | jq -r '.sha' | cut -b 1-7)
+          UPSTREAM_CORE=$(echo "$CORE_JSON" | jq -r '.sha' | cut -b 1-7)
 
           echo "update_needed=true" >> "$GITHUB_OUTPUT"
           echo "pkg_version=$(date +%Y.%m.%d)" >> "$GITHUB_OUTPUT"
           echo "latest_daed_full=$UPSTREAM_DAED_FULL" >> "$GITHUB_OUTPUT"
           echo "latest_daed_short=$UPSTREAM_DAED" >> "$GITHUB_OUTPUT"
+          echo "latest_wing_short=$UPSTREAM_WING" >> "$GITHUB_OUTPUT"
+          echo "latest_core_short=$UPSTREAM_CORE" >> "$GITHUB_OUTPUT"
 
   build:
     needs: check_update
     if: needs.check_update.outputs.update_needed == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # 🔑 极其关键：必须赋予工作流向仓库写入 Release 的权限
+      contents: write
     steps:
       - name: Checkout Source
         uses: actions/checkout@v6
@@ -53,7 +58,27 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang llvm curl jq dos2unix build-essential libncurses5-dev gawk gettext unzip sysstat qemu-utils
 
-      - name: Integrate SDK & Compile
+      - name: Inject Dynamic Hashes into Makefile
+        run: |
+          # 动态将最新的 Commit Hash 注入到你原始的 Makefile 中，完美绕过 Hash 校验报错
+          find . -type f -name "Makefile" -exec dos2unix {} \; -print || true
+          
+          sed -i '/PKG_VERSION:/d' ./daed/Makefile
+          sed -i "7 a PKG_VERSION:=${{ needs.check_update.outputs.pkg_version }}" ./daed/Makefile
+          
+          sed -i '/DAED_VERSION:/d' ./daed/Makefile
+          sed -i "8 a DAED_VERSION:=daed-${{ needs.check_update.outputs.latest_daed_short }}" ./daed/Makefile
+          
+          sed -i '/WING_VERSION:=/d' ./daed/Makefile
+          sed -i "9 a WING_VERSION:=wing-${{ needs.check_update.outputs.latest_wing_short }}" ./daed/Makefile
+          
+          sed -i '/CORE_VERSION:=/d' ./daed/Makefile
+          sed -i "10 a CORE_VERSION:=core-${{ needs.check_update.outputs.latest_core_short }}" ./daed/Makefile
+          
+          sed -i '/PKG_SOURCE_VERSION:/d' ./daed/Makefile
+          sed -i "17 a PKG_SOURCE_VERSION:=${{ needs.check_update.outputs.latest_daed_full }}" ./daed/Makefile
+
+      - name: Integrate SDK & Compile Firmware
         uses: sbwml/openwrt-gh-action-sdk@go1.26
         env:
           ARCH: x86_64-openwrt-24.10
@@ -66,12 +91,11 @@ jobs:
         id: organize
         run: |
           mkdir -p firmware_release
-          # 将编译好的固件和镜像文件收集到独立文件夹中
           find bin/targets/x86/64/ -type f \( -name "*.img.gz" -o -name "*.iso" -o -name "*.manifest" \) -exec cp {} firmware_release/ \;
           echo "release_tag=N4100-Bespoke-$(date +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
           echo "status=success" >> "$GITHUB_OUTPUT"
 
-      - name: Upload Custom Firmware to Releases  # 🚀 点火自动发布到 Releases
+      - name: Upload Custom Firmware to Releases
         uses: softprops/action-gh-release@v2
         if: steps.organize.outputs.status == 'success'
         with:
