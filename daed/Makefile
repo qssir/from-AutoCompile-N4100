@@ -8,6 +8,10 @@ PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/daeuniverse/daed.git
 PKG_SOURCE_VERSION:=main
 
+# 🚀 关键修复：强制跳过动态拉取源码时的 Hash 校验检查
+PKG_HASH:=skip
+PKG_MIRROR_HASH:=skip
+
 PKG_LICENSE:=AGPL-3.0
 PKG_LICENSE_FILES:=LICENSE
 
