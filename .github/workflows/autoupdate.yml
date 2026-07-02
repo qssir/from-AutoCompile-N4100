@@ -29,7 +29,6 @@ jobs:
 
           echo "Upstream DAED: $UPSTREAM_DAED_FULL, Local: $CURRENT_DAED"
 
-          # 始终触发构建以保证专属固件的新鲜度，或根据 sha 差异动态判定
           echo "update_needed=true" >> "$GITHUB_OUTPUT"
           echo "pkg_version=$(date +%Y.%m.%d)" >> "$GITHUB_OUTPUT"
           echo "latest_daed_full=$UPSTREAM_DAED_FULL" >> "$GITHUB_OUTPUT"
@@ -39,6 +38,8 @@ jobs:
     needs: check_update
     if: needs.check_update.outputs.update_needed == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 🔑 极其关键：必须赋予工作流向仓库写入 Release 的权限
     steps:
       - name: Checkout Source
         uses: actions/checkout@v6
@@ -61,9 +62,26 @@ jobs:
           NO_REFRESH_CHECK: true
           V: s
 
-      - name: Upload Custom Firmware Artifacts
-        uses: actions/upload-artifact@v7
+      - name: Organize Firmware Files
+        id: organize
+        run: |
+          mkdir -p firmware_release
+          # 将编译好的固件和镜像文件收集到独立文件夹中
+          find bin/targets/x86/64/ -type f \( -name "*.img.gz" -o -name "*.iso" -o -name "*.manifest" \) -exec cp {} firmware_release/ \;
+          echo "release_tag=N4100-Bespoke-$(date +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
+          echo "status=success" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Custom Firmware to Releases  # 🚀 点火自动发布到 Releases
+        uses: softprops/action-gh-release@v2
+        if: steps.organize.outputs.status == 'success'
         with:
-          name: Intel-N4100-Bespoke-OpenWrt
-          path: bin/targets/x86/64/*
-          retention-days: 7
+          tag_name: ${{ steps.organize.outputs.release_tag }}
+          name: Intel N4100 专属定制固件 [${{ steps.organize.outputs.release_tag }}]
+          body: |
+            🎯 架构：Intel N4100 专属优化 x86_64
+            🛡️ 分区：2GB 豪华固件分区（支持 Diskman 一键扩容）
+            🚀 核心：集成 FUSE 驱动、Docker 运行环境、Samba4、AList
+            🔥 代理：高性能 eBPF 代理服务 DAED 经典对齐
+            🌐 默认网段：192.168.2.1 | 网关：192.168.2.254 | 密码：password
+          files: firmware_release/*
+          token: ${{ secrets.GITHUB_TOKEN }}
