@@ -93,6 +93,7 @@ jobs:
           
           echo "=== Updated daed/Makefile ==="
           cat ./daed/Makefile
+          echo "============================="
 
       - name: Integrate SDK & Compile Firmware
         uses: sbwml/openwrt-gh-action-sdk@go1.26
@@ -102,15 +103,22 @@ jobs:
           PACKAGES: luci-app-daed daed
           NO_REFRESH_CHECK: true
           V: s
+          # Go 代理配置，解决跨境 Go 模块下载问题
+          GOPROXY: https://proxy.golang.org,direct
+          GOSUMDB: sum.golang.org
 
       - name: Organize Firmware Files
         id: organize
         run: |
           mkdir -p firmware_release
-          # 注意：sbwml/openwrt-gh-action-sdk 生成的是软件包(ipk/apk)，不是固件镜像
+          # sbwml/openwrt-gh-action-sdk 生成的是软件包(ipk/apk)
           # 收集编译好的 ipk/apk 包
-          find bin/packages -type f \( -name "*.ipk" -o -name "*.apk" \) -exec cp {} firmware_release/ \; || \
-          find . -type f \( -name "*.ipk" -o -name "*.apk" \) -exec cp {} firmware_release/ \;
+          find bin/packages -type f \( -name "*.ipk" -o -name "*.apk" \) -exec cp {} firmware_release/ \; 2>/dev/null || \
+          find . -path ./firmware_release -prune -o -type f \( -name "*.ipk" -o -name "*.apk" \) -print | xargs -I{} cp {} firmware_release/ 2>/dev/null || true
+          
+          echo "=== Collected files ==="
+          ls -lah firmware_release/ || echo "No packages found"
+          echo "======================="
           echo "release_tag=N4100-Bespoke-$(date +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
           echo "status=success" >> "$GITHUB_OUTPUT"
 
