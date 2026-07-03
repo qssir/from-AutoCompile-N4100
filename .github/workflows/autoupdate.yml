@@ -86,10 +86,22 @@ jobs:
           update_var "CORE_VERSION" "core-${{ needs.check_update.outputs.latest_core_short }}"
           update_var "PKG_SOURCE_VERSION" "${{ needs.check_update.outputs.latest_daed_full }}"
           
-          # 关键修复：删除 PKG_HASH 和 PKG_MIRROR_HASH
-          # 当 PKG_SOURCE_PROTO:=git 时，删除后 OpenWrt 直接 git clone，不校验 mirror tarball
+          # 删除 PKG_HASH（如果存在）
           sed -i '/^PKG_HASH/d' ./daed/Makefile
+          
+          # 删除 PKG_MIRROR_HASH，避免 check 阶段报 "HASH uses deprecated hash"
           sed -i '/^PKG_MIRROR_HASH/d' ./daed/Makefile
+          
+          # 关键修复1：添加 PKG_SOURCE_SUBMODULES:=skip
+          # 这样 DownloadMethod/rawgit 会跳过 git submodule update
+          sed -i '/^PKG_SOURCE_SUBMODULES/d' ./daed/Makefile
+          sed -i "/^PKG_SOURCE_VERSION/a PKG_SOURCE_SUBMODULES:=skip" ./daed/Makefile
+          
+          # 关键修复2：修改 PKG_SOURCE_URL 使用 GitHub 镜像，绕过 github_archive 方法
+          # 原始 URL: https://github.com/daeuniverse/daed.git
+          # 改为: https://github.com.cnpmjs.org/daeuniverse/daed.git
+          # 这样 dl_method_git 不会识别为 github.com，直接使用 rawgit（git clone）
+          sed -i 's|PKG_SOURCE_URL:=.*|PKG_SOURCE_URL:=https://github.com.cnpmjs.org/daeuniverse/daed.git|' ./daed/Makefile
           
           echo "=== Updated daed/Makefile ==="
           cat ./daed/Makefile
@@ -111,10 +123,10 @@ jobs:
         id: organize
         run: |
           mkdir -p firmware_release
-          # sbwml/openwrt-gh-action-sdk 生成的是软件包(ipk/apk)
+          # sbwml/openwrt-gh-action-sdk 生成的是软件包(ipk/apk)，不是固件镜像
           # 收集编译好的 ipk/apk 包
-          find bin/packages -type f \( -name "*.ipk" -o -name "*.apk" \) -exec cp {} firmware_release/ \; 2>/dev/null || \
-          find . -path ./firmware_release -prune -o -type f \( -name "*.ipk" -o -name "*.apk" \) -print | xargs -I{} cp {} firmware_release/ 2>/dev/null || true
+          find bin/packages -type f \( -name "*.ipk" -o -name "*.apk" \) -exec cp -t firmware_release/ {} + 2>/dev/null || true
+          find . -type f \( -name "*.ipk" -o -name "*.apk" \) -not -path "./firmware_release/*" -exec cp -t firmware_release/ {} + 2>/dev/null || true
           
           echo "=== Collected files ==="
           ls -lah firmware_release/ || echo "No packages found"
