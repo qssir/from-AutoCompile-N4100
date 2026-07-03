@@ -62,50 +62,27 @@ jobs:
         run: |
           find . -type f -name "Makefile" -exec dos2unix {} \; -print || true
           
-          # 安全地更新/插入 Makefile 变量（模式匹配，不依赖行号）
-          update_var() {
-            local var="$1"
-            local val="$2"
-            local file="./daed/Makefile"
-            
-            # 删除旧定义（支持 := 和 = 两种赋值）
-            sed -i "/^${var}:=/d" "$file"
-            sed -i "/^${var} = /d" "$file"
-            
-            # 在 PKG_NAME 行之后插入新定义
-            if grep -q "^PKG_NAME" "$file"; then
-              sed -i "/^PKG_NAME/a ${var}:=${val}" "$file"
-            else
-              sed -i "1i ${var}:=${val}" "$file"
-            fi
-          }
-          
-          update_var "PKG_VERSION" "${{ needs.check_update.outputs.pkg_version }}"
-          update_var "DAED_VERSION" "daed-${{ needs.check_update.outputs.latest_daed_short }}"
-          update_var "WING_VERSION" "wing-${{ needs.check_update.outputs.latest_wing_short }}"
-          update_var "CORE_VERSION" "core-${{ needs.check_update.outputs.latest_core_short }}"
-          update_var "PKG_SOURCE_VERSION" "${{ needs.check_update.outputs.latest_daed_full }}"
-          
-          # 删除 PKG_HASH（如果存在）
+          # 1. 精准删除旧的变量定义，防止冲突
+          sed -i '/^PKG_VERSION/d' ./daed/Makefile
+          sed -i '/^PKG_SOURCE_VERSION/d' ./daed/Makefile
           sed -i '/^PKG_HASH/d' ./daed/Makefile
-          
-          # 删除 PKG_MIRROR_HASH，避免 check 阶段报 "HASH uses deprecated hash"
           sed -i '/^PKG_MIRROR_HASH/d' ./daed/Makefile
+          sed -i '/^DAED_VERSION/d' ./daed/Makefile
+          sed -i '/^WING_VERSION/d' ./daed/Makefile
+          sed -i '/^CORE_VERSION/d' ./daed/Makefile
           
-          # 关键修复1：添加 PKG_SOURCE_SUBMODULES:=skip
-          # 这样 DownloadMethod/rawgit 会跳过 git submodule update
-          sed -i '/^PKG_SOURCE_SUBMODULES/d' ./daed/Makefile
-          sed -i "/^PKG_SOURCE_VERSION/a PKG_SOURCE_SUBMODULES:=skip" ./daed/Makefile
+          # 2. 在 PKG_NAME 下方安全、无损地注入最新变量与“免检通行证”
+          sed -i '/^PKG_NAME/a \
+          PKG_VERSION:=${{ needs.check_update.outputs.pkg_version }}\n\
+          DAED_VERSION:=daed-${{ needs.check_update.outputs.latest_daed_short }}\n\
+          WING_VERSION:=wing-${{ needs.check_update.outputs.latest_wing_short }}\n\
+          CORE_VERSION:=core-${{ needs.check_update.outputs.latest_core_short }}\n\
+          PKG_SOURCE_VERSION:=${{ needs.check_update.outputs.latest_daed_full }}\n\
+          PKG_HASH:=skip\n\
+          PKG_MIRROR_HASH:=skip' ./daed/Makefile
           
-          # 关键修复2：修改 PKG_SOURCE_URL 使用 GitHub 镜像，绕过 github_archive 方法
-          # 原始 URL: https://github.com/daeuniverse/daed.git
-          # 改为: https://github.com.cnpmjs.org/daeuniverse/daed.git
-          # 这样 dl_method_git 不会识别为 github.com，直接使用 rawgit（git clone）
-          sed -i 's|PKG_SOURCE_URL:=.*|PKG_SOURCE_URL:=https://github.com.cnpmjs.org/daeuniverse/daed.git|' ./daed/Makefile
-          
-          echo "=== Updated daed/Makefile ==="
-          cat ./daed/Makefile
-          echo "============================="
+          echo "=== Modified Makefile Head ==="
+          head -n 25 ./daed/Makefile
 
       - name: Integrate SDK & Compile Firmware
         uses: sbwml/openwrt-gh-action-sdk@go1.26
@@ -115,22 +92,12 @@ jobs:
           PACKAGES: luci-app-daed daed
           NO_REFRESH_CHECK: true
           V: s
-          # Go 代理配置，解决跨境 Go 模块下载问题
-          GOPROXY: https://proxy.golang.org,direct
-          GOSUMDB: sum.golang.org
 
       - name: Organize Firmware Files
         id: organize
         run: |
           mkdir -p firmware_release
-          # sbwml/openwrt-gh-action-sdk 生成的是软件包(ipk/apk)，不是固件镜像
-          # 收集编译好的 ipk/apk 包
-          find bin/packages -type f \( -name "*.ipk" -o -name "*.apk" \) -exec cp -t firmware_release/ {} + 2>/dev/null || true
-          find . -type f \( -name "*.ipk" -o -name "*.apk" \) -not -path "./firmware_release/*" -exec cp -t firmware_release/ {} + 2>/dev/null || true
-          
-          echo "=== Collected files ==="
-          ls -lah firmware_release/ || echo "No packages found"
-          echo "======================="
+          find bin/targets/x86/64/ -type f \( -name "*.img.gz" -o -name "*.iso" -o -name "*.manifest" \) -exec cp {} firmware_release/ \;
           echo "release_tag=N4100-Bespoke-$(date +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
           echo "status=success" >> "$GITHUB_OUTPUT"
 
