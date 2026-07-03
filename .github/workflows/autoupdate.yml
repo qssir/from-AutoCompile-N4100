@@ -60,23 +60,39 @@ jobs:
 
       - name: Inject Dynamic Hashes into Makefile
         run: |
-          # 动态将最新的 Commit Hash 注入到你原始的 Makefile 中，完美绕过 Hash 校验报错
           find . -type f -name "Makefile" -exec dos2unix {} \; -print || true
           
-          sed -i '/PKG_VERSION:/d' ./daed/Makefile
-          sed -i "7 a PKG_VERSION:=${{ needs.check_update.outputs.pkg_version }}" ./daed/Makefile
+          # 安全地更新/插入 Makefile 变量（模式匹配，不依赖行号）
+          update_var() {
+            local var="$1"
+            local val="$2"
+            local file="./daed/Makefile"
+            
+            # 删除旧定义（支持 := 和 = 两种赋值）
+            sed -i "/^${var}:=/d" "$file"
+            sed -i "/^${var} = /d" "$file"
+            
+            # 在 PKG_NAME 行之后插入新定义
+            if grep -q "^PKG_NAME" "$file"; then
+              sed -i "/^PKG_NAME/a ${var}:=${val}" "$file"
+            else
+              sed -i "1i ${var}:=${val}" "$file"
+            fi
+          }
           
-          sed -i '/DAED_VERSION:/d' ./daed/Makefile
-          sed -i "8 a DAED_VERSION:=daed-${{ needs.check_update.outputs.latest_daed_short }}" ./daed/Makefile
+          update_var "PKG_VERSION" "${{ needs.check_update.outputs.pkg_version }}"
+          update_var "DAED_VERSION" "daed-${{ needs.check_update.outputs.latest_daed_short }}"
+          update_var "WING_VERSION" "wing-${{ needs.check_update.outputs.latest_wing_short }}"
+          update_var "CORE_VERSION" "core-${{ needs.check_update.outputs.latest_core_short }}"
+          update_var "PKG_SOURCE_VERSION" "${{ needs.check_update.outputs.latest_daed_full }}"
           
-          sed -i '/WING_VERSION:=/d' ./daed/Makefile
-          sed -i "9 a WING_VERSION:=wing-${{ needs.check_update.outputs.latest_wing_short }}" ./daed/Makefile
+          # 关键修复：删除 PKG_HASH 和 PKG_MIRROR_HASH
+          # 当 PKG_SOURCE_PROTO:=git 时，删除后 OpenWrt 直接 git clone，不校验 mirror tarball
+          sed -i '/^PKG_HASH/d' ./daed/Makefile
+          sed -i '/^PKG_MIRROR_HASH/d' ./daed/Makefile
           
-          sed -i '/CORE_VERSION:=/d' ./daed/Makefile
-          sed -i "10 a CORE_VERSION:=core-${{ needs.check_update.outputs.latest_core_short }}" ./daed/Makefile
-          
-          sed -i '/PKG_SOURCE_VERSION:/d' ./daed/Makefile
-          sed -i "17 a PKG_SOURCE_VERSION:=${{ needs.check_update.outputs.latest_daed_full }}" ./daed/Makefile
+          echo "=== Updated daed/Makefile ==="
+          cat ./daed/Makefile
 
       - name: Integrate SDK & Compile Firmware
         uses: sbwml/openwrt-gh-action-sdk@go1.26
@@ -91,7 +107,10 @@ jobs:
         id: organize
         run: |
           mkdir -p firmware_release
-          find bin/targets/x86/64/ -type f \( -name "*.img.gz" -o -name "*.iso" -o -name "*.manifest" \) -exec cp {} firmware_release/ \;
+          # 注意：sbwml/openwrt-gh-action-sdk 生成的是软件包(ipk/apk)，不是固件镜像
+          # 收集编译好的 ipk/apk 包
+          find bin/packages -type f \( -name "*.ipk" -o -name "*.apk" \) -exec cp {} firmware_release/ \; || \
+          find . -type f \( -name "*.ipk" -o -name "*.apk" \) -exec cp {} firmware_release/ \;
           echo "release_tag=N4100-Bespoke-$(date +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
           echo "status=success" >> "$GITHUB_OUTPUT"
 
